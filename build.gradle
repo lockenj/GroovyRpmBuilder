@@ -1,0 +1,71 @@
+import groovy.text.SimpleTemplateEngine
+import java.util.Date
+import java.text.SimpleDateFormat
+
+apply plugin: 'java'
+
+archivesBaseName = 'groovy'
+version = "2.1.3"
+
+task rpmSourceTar(type: Tar) { 
+	archiveName = "${archivesBaseName}-${version}.tgz"
+	compression = Compression.GZIP 
+	destinationDir = new File("${buildDir}/SOURCES")		
+	
+	from tarTree("${projectDir}/src/${archivesBaseName}-${version}.tar.gz")			
+	into "/"
+}
+
+task makeRpmEnv << {
+	//Copy the specfile	template
+	copy{
+		from "${projectDir}/template.spec"
+		into "${buildDir}/SPECS"
+		rename 'template.spec', "${archivesBaseName}.spec"
+	}
+	
+	//Populate template variables in the specfile	
+	def specFile = new File("${buildDir}/SPECS/${archivesBaseName}.spec")
+	def dateFormatter = new SimpleDateFormat("EEE MMM dd yyyy 'T' HH:mm:ss.SSS")
+	def builtDate = dateFormatter.format(new Date())
+	def binding = [		
+		"name":archivesBaseName,
+		"date":builtDate,
+		"user": System.getProperty('user.name'),
+		"version":version,
+		"release":"0",
+		"changelog":"HERE ARE THE CHANGES"
+	]
+	def engine = new SimpleTemplateEngine()
+	def template = engine.createTemplate(specFile.text).make(binding)
+	specFile.write(template.toString())
+	
+	
+	//Use rpmbuild to create RPM
+	exec{
+		workingDir './build'
+		commandLine 'rpmbuild', '-bb', '--define', "_topdir ${buildDir}","SPECS/${archivesBaseName}.spec"
+		//TODO on windows:
+		//commandLine 'cmd', '/c', 'stop.bat'			
+	}
+}
+makeRpmEnv.dependsOn(rpmSourceTar)
+
+task rpmZip (dependsOn: makeRpmEnv, type: Tar) {
+   description = 'Creates Tar archive of rpm.'
+   compression = Compression.GZIP
+   baseName = project.archivesBaseName
+   
+   //Copy all RPMs into the tar.
+   from('build/RPMS')
+}
+
+configurations {
+	rpm
+	rpmSource
+}
+
+artifacts {
+	archives rpmZip
+	rpmSource rpmSourceTar
+}
